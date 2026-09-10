@@ -1,1 +1,350 @@
 
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Cost Breakdown Estimator</title>
+    
+    <!-- Load D3.js and D3-Sankey from UNPKG CDNs -->
+    <script src="https://unpkg.com/d3@7"></script>
+    <script src="https://unpkg.com/d3-sankey@0.12.3/dist/d3-sankey.min.js"></script>
+    
+    <style>
+        :root {
+            --bg-color: #0d1117;
+            --panel-bg: #161b22;
+            --text-main: #c9d1d9;
+            --accent-green: #3fb950;
+            --accent-cyan: #2f81f7;
+            --border: #30363d;
+        }
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+        }
+        .container {
+            width: 100%;
+            max-width: 1200px;
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+        .controls {
+            flex: 1;
+            min-width: 320px;
+            background: var(--panel-bg);
+            padding: 24px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+        }
+        .visualization {
+            flex: 2;
+            min-width: 600px;
+            background: var(--panel-bg);
+            padding: 24px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+        }
+        h2 { 
+            margin-top: 0; 
+            padding-bottom: 12px; 
+            border-bottom: 1px solid var(--border); 
+            font-size: 1.25rem;
+        }
+        .control-group { margin-bottom: 24px; }
+        label { 
+            display: block; 
+            margin-bottom: 8px; 
+            font-weight: 500; 
+            font-size: 0.95rem; 
+        }
+        select {
+            width: 100%;
+            padding: 10px;
+            background: var(--bg-color);
+            color: var(--text-main);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 1rem;
+            margin-bottom: 10px;
+        }
+        .slider-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .slider-val { font-weight: bold; color: var(--accent-cyan); }
+        .slider-val.token-val { color: var(--accent-green); }
+        input[type="range"] {
+            width: 100%;
+            cursor: pointer;
+            accent-color: var(--accent-cyan);
+        }
+        #slide-token { accent-color: var(--accent-green); }
+        
+        #chart { 
+            width: 100%; 
+            height: 500px; 
+            flex-grow: 1; 
+            min-height: 500px; 
+        }
+        .summary {
+            margin-top: 20px;
+            padding: 16px;
+            background: var(--bg-color);
+            border-radius: 6px;
+            text-align: center;
+            font-size: 1.2rem;
+            border: 1px solid var(--border);
+        }
+        .token-text { color: var(--accent-green); font-weight: bold; }
+        .infra-text { color: var(--accent-cyan); font-weight: bold; }
+
+        /* Sankey SVG Styles */
+        .node rect { stroke: #161b22; stroke-width: 2px; }
+        .node text { fill: var(--text-main); font-size: 13px; font-weight: 500; pointer-events: none; }
+        .link { fill: none; transition: stroke-opacity 0.2s; }
+        .link:hover { stroke-opacity: 0.8 !important; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <!-- Left Panel: Controls -->
+    <div class="controls">
+        <h2>Budget Parameters</h2>
+        
+        <div class="control-group">
+            <label for="deploymentMode">Deployment Architecture Baseline</label>
+            <select id="deploymentMode">
+                <option value="managed">Managed API (e.g., OpenAI, Anthropic)</option>
+                <option value="cloud">Custom Cloud Instance (e.g., AWS, Azure VM)</option>
+                <option value="onprem">On-Premise / Custom Hardware Build</option>
+            </select>
+        </div>
+
+        <div class="control-group">
+            <div class="slider-row">
+                <label>Token / Inference Costs</label>
+                <span class="slider-val token-val" id="val-token">0.0%</span>
+            </div>
+            <input type="range" id="slide-token" min="0" max="100" value="85">
+        </div>
+
+        <div class="control-group">
+            <div class="slider-row">
+                <label>Cloud Compute / GPU Costs</label>
+                <span class="slider-val" id="val-compute">0.0%</span>
+            </div>
+            <input type="range" id="slide-compute" min="0" max="100" value="1">
+        </div>
+
+        <div class="control-group">
+            <div class="slider-row">
+                <label>Data / Networking Costs</label>
+                <span class="slider-val" id="val-data">0.0%</span>
+            </div>
+            <input type="range" id="slide-data" min="0" max="100" value="5">
+        </div>
+
+        <div class="control-group">
+            <div class="slider-row">
+                <label>Governance / FinOps Tooling</label>
+                <span class="slider-val" id="val-gov">0.0%</span>
+            </div>
+            <input type="range" id="slide-gov" min="0" max="100" value="9">
+        </div>
+    </div>
+
+    <!-- Right Panel: Visualization -->
+    <div class="visualization">
+        <h2>AI Tokenomics Flow</h2>
+        <div id="chart"></div>
+        <div class="summary" id="summary-text">
+            Overall Split: <span class="token-text">0.0% Token Costs</span> vs <span class="infra-text">0.0% Infrastructure/Non-Token</span>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Presets for the dropdown menu
+    const presets = {
+        "managed": [85, 1, 5, 9],
+        "cloud": [20, 50, 15, 15],
+        "onprem": [5, 65, 20, 10]
+    };
+
+    const elements = {
+        mode: document.getElementById('deploymentMode'),
+        sliders: [
+            document.getElementById('slide-token'),
+            document.getElementById('slide-compute'),
+            document.getElementById('slide-data'),
+            document.getElementById('slide-gov')
+        ],
+        displays: [
+            document.getElementById('val-token'),
+            document.getElementById('val-compute'),
+            document.getElementById('val-data'),
+            document.getElementById('val-gov')
+        ],
+        summary: document.getElementById('summary-text')
+    };
+
+    // Auto-update sliders when dropdown changes
+    elements.mode.addEventListener('change', (e) => {
+        const p = presets[e.target.value];
+        p.forEach((val, i) => {
+            elements.sliders[i].value = val;
+        });
+        updateData();
+    });
+
+    // Update diagram when any slider moves
+    elements.sliders.forEach(slider => {
+        slider.addEventListener('input', updateData);
+    });
+
+    // Redraw diagram on window resize to ensure responsiveness
+    window.addEventListener('resize', updateData);
+
+    function updateData() {
+        // Read raw weight values from the sliders
+        let weights = elements.sliders.map(s => parseFloat(s.value));
+        let total = weights.reduce((a, b) => a + b, 0);
+        
+        // Failsafe to prevent division by zero if all sliders are pulled to 0
+        if (total === 0) {
+            weights = [25, 25, 25, 25];
+            total = 100;
+        }
+
+        // Normalize weights into true percentages (summing to 100)
+        let percs = weights.map(w => (w / total) * 100);
+
+        // Enforce a minimum of 0.1% to prevent Sankey nodes from breaking/disappearing
+        percs = percs.map(p => Math.max(p, 0.1));
+        
+        // Re-normalize after setting the minimum bounds
+        let adjustedTotal = percs.reduce((a, b) => a + b, 0);
+        percs = percs.map(p => (p / adjustedTotal) * 100);
+
+        // Update the text values next to sliders
+        percs.forEach((p, i) => {
+            elements.displays[i].innerText = p.toFixed(1) + '%';
+        });
+
+        // Calculate the aggregate splits
+        const tokenTotal = percs[0];
+        const infraTotal = percs[1] + percs[2] + percs[3];
+
+        // Update the bottom summary text
+        elements.summary.innerHTML = `Overall Split: <span class="token-text">${tokenTotal.toFixed(1)}% Token Costs</span> vs <span class="infra-text">${infraTotal.toFixed(1)}% Infrastructure & Non-Token</span>`;
+
+        drawSankey(percs);
+    }
+
+    function drawSankey(percs) {
+        const container = document.getElementById('chart');
+        container.innerHTML = ""; // Clear the previous SVG on redraw
+
+        const width = container.clientWidth;
+        const height = container.clientHeight;
+
+        const svg = d3.select("#chart").append("svg")
+            .attr("width", width)
+            .attr("height", height);
+
+        const sankey = d3.sankey()
+            .nodeWidth(24)
+            .nodePadding(30)
+            .extent([[10, 10], [width - 10, height - 20]]);
+
+        // Define the nodes and flow logic
+        const data = {
+            nodes: [
+                { name: "Total AI Budget" },               // Index 0
+                { name: "Token Costs" },                   // Index 1
+                { name: "Infrastructure & Non-Token" },    // Index 2
+                { name: "API / Inference" },               // Index 3
+                { name: "Compute / GPU" },                 // Index 4
+                { name: "Data / Networking" },             // Index 5
+                { name: "Governance / FinOps" }            // Index 6
+            ],
+            links: [
+                { source: 0, target: 1, value: percs[0] },
+                { source: 0, target: 2, value: percs[1] + percs[2] + percs[3] },
+                { source: 1, target: 3, value: percs[0] },
+                { source: 2, target: 4, value: percs[1] },
+                { source: 2, target: 5, value: percs[2] },
+                { source: 2, target: 6, value: percs[3] }
+            ]
+        };
+
+        const { nodes, links } = sankey(data);
+
+        // Color coding function
+        const getColor = (name) => {
+            if (name === "Total AI Budget") return "#8b949e";
+            if (name === "Token Costs" || name === "API / Inference") return "#3fb950"; // Neon Green
+            return "#2f81f7"; // Neon Cyan
+        };
+
+        // Render Links (The Flow Paths)
+        const link = svg.append("g")
+            .selectAll(".link")
+            .data(links)
+            .enter().append("path")
+            .attr("class", "link")
+            .attr("d", d3.sankeyLinkHorizontal())
+            .attr("stroke", d => getColor(d.source.name))
+            .attr("stroke-width", d => Math.max(1, d.width))
+            .style("stroke-opacity", 0.35);
+
+        // Hover tooltips for links
+        link.append("title")
+            .text(d => `${d.source.name} → ${d.target.name}\n${d.value.toFixed(1)}%`);
+
+        // Render Nodes (The Blocks)
+        const node = svg.append("g")
+            .selectAll(".node")
+            .data(nodes)
+            .enter().append("g")
+            .attr("class", "node")
+            .attr("transform", d => `translate(${d.x0},${d.y0})`);
+
+        node.append("rect")
+            .attr("height", d => d.y1 - d.y0)
+            .attr("width", sankey.nodeWidth())
+            .attr("fill", d => getColor(d.name))
+            .attr("rx", 3)
+            .append("title")
+            .text(d => `${d.name}\n${d.value.toFixed(1)}%`);
+
+        // Render Text Labels
+        node.append("text")
+            .attr("x", -8)
+            .attr("y", d => (d.y1 - d.y0) / 2)
+            .attr("dy", "0.35em")
+            .attr("text-anchor", "end")
+            .text(d => `${d.name} (${d.value.toFixed(1)}%)`)
+            .filter(d => d.x0 < width / 2)
+            .attr("x", sankey.nodeWidth() + 8)
+            .attr("text-anchor", "start");
+    }
+
+    // Initialize the chart on first load
+    updateData();
+</script>
+</body>
+</html>
